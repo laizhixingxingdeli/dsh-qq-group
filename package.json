@@ -52,6 +52,7 @@
     "test:voice": "node tests/voice-trigger.test.mjs",
     "test:reply": "node tests/reply-plan.test.mjs",
     "test:private": "node tests/private.test.mjs",
+    "test:dossier": "node tests/dossier.test.mjs",
     "test": "npm run test:memory && npm run test:proactive && npm run test:mood && npm run test:voice && npm run test:reply && npm run test:private"
   },
   "engines": {

@@ -32,6 +32,15 @@ import { basename, dirname, join } from 'node:path';
 
 import { PRIVATE_KEY_PREFIX, policyFor, privateKey, privatePolicyFor, type GroupPolicy, type QqConfig } from './config';
 import { selectPermanent, type PermanentAddInput, type PermanentAddResult, type PermanentEntry } from './permanent';
+import {
+  archiveTurn as archiveDossierTurn,
+  consolidate as consolidateDossier,
+  dossierBlockFor,
+  ensureDossierDir,
+  readDossierConfig,
+  shouldConsolidate,
+  type ConsolidateResult,
+} from './dossier';
 
 /** 会话 key 是不是私聊（用于在少数必须区分的地方做分派） */
 const isPrivateKey = (key: string): boolean => key.startsWith(PRIVATE_KEY_PREFIX);
@@ -287,6 +296,9 @@ export class QqBridge {
   private moods: MoodStore = emptyMoodStore();
   private moodPath = '';
   private timer: ReturnType<typeof setTimeout> | undefined;
+  /** 人物档案：每 10 分钟看一眼要不要做夜间整理 */
+  private dossierTimer: ReturnType<typeof setInterval> | undefined;
+  private dossierRunning = false;
   private running = false;
   /** 正在处理中的群（同一个群不并发回复） */
   private readonly busy = new Set<string>();
@@ -674,6 +686,16 @@ export class QqBridge {
     this.running = true;
     this.client.connect();
     this.scheduleTick();
+    if (this.dossierTimer === undefined) {
+      try {
+        ensureDossierDir(this.dossierDir());
+      } catch (e) {
+        this.log('warn', `档案目录创建失败：${e instanceof Error ? e.message : String(e)}`);
+      }
+      this.dossierTimer = setInterval(() => void this.maybeConsolidateDossier(), 10 * 60_000);
+      // 开机/启动时补一次（凌晨机器关着的情况）
+      setTimeout(() => void this.maybeConsolidateDossier(), 60_000);
+    }
     this.deps.onState?.();
     this.log('info', `QQ 群桥已启动：${this.config.url}（模式 ${this.config.mode}）`);
     return { ok: true };
@@ -776,6 +798,10 @@ export class QqBridge {
       clearTimeout(this.timer);
       this.timer = undefined;
     }
+    if (this.dossierTimer !== undefined) {
+      clearInterval(this.dossierTimer);
+      this.dossierTimer = undefined;
+    }
     const client = this.client;
     this.client = undefined;
     if (client !== undefined) await client.close();
@@ -853,6 +879,13 @@ export class QqBridge {
       }
       case 'help':
         return ownerHelp(this.config.selfName);
+      case 'dossier': {
+        const result = await this.runDossierConsolidation();
+        if (result === undefined) return '档案整理正在进行或没有启用，稍后再试';
+        return result.failed.length === 0
+          ? `档案整理完成：${result.contexts} 个会话、调用模型 ${result.calls} 次、${result.changes} 处改动`
+          : `档案整理部分失败（${result.failed.join('、')}），已整理的部分保留，下次接着来`;
+      }
       case 'unknown':
         return `没听懂这条指令：${command.raw.slice(0, 40)}。发「帮助」看能做什么。`;
       default:
@@ -1003,7 +1036,7 @@ export class QqBridge {
     this.lastSpeaker.set(sessionKey, userId);
 
     if (message.text.trim() !== '') {
-      this.appendMemoryTurn(sessionKey, { role: 'user', name, text: message.text.slice(0, 500), ts: now });
+      this.appendMemoryTurn(sessionKey, { role: 'user', name, text: message.text.slice(0, 500), ts: now }, userId);
     }
     observeHuman(state, effective, now);
     state.lastDirectAt = now;
@@ -1161,7 +1194,7 @@ export class QqBridge {
     this.lastSpeaker.set(groupId, userId);
 
     if (message.text.trim() !== '') {
-      this.appendMemoryTurn(groupId, { role: 'user', name, text: message.text.slice(0, 500), ts: now });
+      this.appendMemoryTurn(groupId, { role: 'user', name, text: message.text.slice(0, 500), ts: now }, userId);
     }
 
     // 人类说话 → 刷新冷场计时（并重排下一次主动开口）
@@ -2132,6 +2165,10 @@ export class QqBridge {
         ownerMention: mentionOwner,
         ownerPriorityPrompt: this.deps.ownerPriority?.(),
         ...(permanentMemories.length > 0 ? { permanentMemories } : {}),
+        ...(() => {
+          const dossier = this.dossierBlock(groupId);
+          return dossier === '' ? {} : { dossier };
+        })(),
         ...(/空间|说说|动态|qzone/i.test(message?.text ?? '') && this.deps.qzoneRecent !== undefined
           ? {
               qzonePosts: this.deps.qzoneRecent(5).map(
@@ -2949,7 +2986,9 @@ export class QqBridge {
   private appendMemoryTurn(
     groupId: string,
     turn: { role: 'user' | 'assistant'; name: string; text: string; ts: number },
+    qq?: string,
   ): void {
+    this.archiveForDossier(groupId, turn, qq);
     const policy = this.policyOf(groupId);
     // 留出压缩缓冲：真正的裁量由 maybeCompressMemory 做，避免 appendTurn 抢先丢掉原文
     appendTurn(this.memory, groupId, turn, {
@@ -3167,6 +3206,93 @@ export class QqBridge {
   }
 
   /** 把她说的话记进上下文 */
+  // ───────────── 人物档案（dossier.ts） ─────────────
+
+  private dossierDir(): string {
+    return join(this.deps.userRoot, 'dossier');
+  }
+
+  /** 建档的人：主人 + 永久记忆名单里的人 */
+  private dossierPeople(): string[] {
+    const people = new Set<string>();
+    const owner = this.config.ownerQq.trim();
+    if (/^\d{5,12}$/.test(owner)) people.add(owner);
+    for (const qq of this.deps.permanent?.people() ?? []) people.add(qq);
+    return [...people];
+  }
+
+  private archiveForDossier(
+    groupId: string,
+    turn: { role: 'user' | 'assistant'; name: string; text: string; ts: number },
+    qq?: string,
+  ): void {
+    try {
+      const cfg = readDossierConfig(this.dossierDir());
+      if (!cfg.enabled || turn.text.trim() === '' || turn.text.trim().startsWith('/')) return;
+      archiveDossierTurn(this.dossierDir(), groupId, {
+        ts: turn.ts,
+        role: turn.role,
+        ...(qq === undefined ? {} : { qq }),
+        name: turn.name,
+        text: turn.text,
+      });
+    } catch (e) {
+      this.log('debug', `档案存档失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  private dossierBlock(groupId: string): string {
+    try {
+      const dir = this.dossierDir();
+      return dossierBlockFor(dir, groupId, this.dossierPeople(), readDossierConfig(dir), this.config.selfName);
+    } catch (e) {
+      this.log('warn', `读取档案失败（本轮不带档案）：${e instanceof Error ? e.message : String(e)}`);
+      return '';
+    }
+  }
+
+  private async maybeConsolidateDossier(): Promise<void> {
+    if (!this.running) return;
+    const dir = this.dossierDir();
+    if (!shouldConsolidate(dir, readDossierConfig(dir), Date.now())) return;
+    await this.runDossierConsolidation();
+  }
+
+  /** 跑一次档案整理；正在跑或没启用时返回 undefined */
+  private async runDossierConsolidation(): Promise<ConsolidateResult | undefined> {
+    const dir = this.dossierDir();
+    const cfg = readDossierConfig(dir);
+    if (!cfg.enabled || this.dossierRunning || this.llm === undefined) return undefined;
+    this.dossierRunning = true;
+    try {
+      const result = await consolidateDossier({
+        dir,
+        cfg,
+        tracked: this.dossierPeople(),
+        selfName: this.config.selfName,
+        now: Date.now(),
+        chat: async (system, user) => {
+          const reply = await this.llm.chat(
+            [
+              { role: 'system', content: system },
+              { role: 'user', content: user },
+            ],
+            { json: true, timeoutMs: 120_000, purpose: 'memory' },
+          );
+          return reply.ok ? { ok: true, text: reply.text } : { ok: false, message: reply.message };
+        },
+        log: (level, message) => this.log(level, message),
+      });
+      this.log('info', `档案整理：${result.contexts} 个会话、${result.calls} 次调用、${result.changes} 处改动${result.failed.length > 0 ? `，失败：${result.failed.join('、')}` : ''}`);
+      return result;
+    } catch (e) {
+      this.log('warn', `档案整理出错：${e instanceof Error ? e.message : String(e)}`);
+      return undefined;
+    } finally {
+      this.dossierRunning = false;
+    }
+  }
+
   private appendAssistant(groupId: string, text: string, ts: number): void {
     this.appendMemoryTurn(groupId, {
       role: 'assistant',

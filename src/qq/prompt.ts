@@ -82,6 +82,8 @@ export interface PromptInput {
   qzonePosts?: string[];
   /** 永久记忆（不随时间衰减；主人可管理） */
   permanentMemories?: string[];
+  /** 人物档案注入块（dossier.ts 生成，已含标题与说明） */
+  dossier?: string;
 }
 
 /** 场合不同，任务不同 */
@@ -167,6 +169,8 @@ export function groupSystemPrompt(input: PromptInput): string {
       ].join('\n'),
     );
   }
+  // 档案紧跟人设与永久记忆：内容不变时整段是固定前缀，利于命中上下文缓存
+  if (input.dossier !== undefined && input.dossier.trim() !== '') parts.push(input.dossier);
   if (input.qzonePosts !== undefined && input.qzonePosts.length > 0) {
     parts.push(
       [
@@ -361,6 +365,7 @@ export type OwnerCommand =
   | { kind: 'mute' }
   | { kind: 'unmute' }
   | { kind: 'help' }
+  | { kind: 'dossier' }
   | { kind: 'unknown'; raw: string };
 
 /** 解析主人私聊发来的指令（宽松：全角空格、中文冒号都认） */
@@ -373,6 +378,7 @@ export function parseOwnerCommand(raw: string): OwnerCommand {
   if (lower === '帮助' || lower === 'help' || lower === '?') return { kind: 'help' };
   if (lower === '静音' || lower === 'mute') return { kind: 'mute' };
   if (lower === '取消静音' || lower === 'unmute') return { kind: 'unmute' };
+  if (lower === '整理档案' || lower === 'dossier') return { kind: 'dossier' };
 
   const pause = /^(?:暂停|pause)\s*(\d{5,12})$/.exec(text);
   if (pause?.[1] !== undefined) return { kind: 'pause', groupId: pause[1] };
@@ -402,6 +408,7 @@ export function ownerHelp(selfName: string): string {
     '说 <群号或QQ> 内容 —— 替你发一句过去',
     '唱 <群号或QQ> [歌名] —— 去那里唱一段',
     '静音 / 取消静音 —— 全局闭嘴/开口',
+    '整理档案 —— 马上把还没整理的聊天记进熟人档案（平时每天凌晨自动做）',
     '',
     '除了这些指令，你直接跟我聊天就行，不用带命令词。',
     '别人要能私聊我，得先把他的 QQ 号加到 qq.json 的 privates 里。',
