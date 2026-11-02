@@ -27,7 +27,7 @@
  * 但日志里必须有原因，`onError` 回调也会带出去——面板与主人私聊都能看到。
  */
 
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
 import { PRIVATE_KEY_PREFIX, policyFor, privateKey, privatePolicyFor, type GroupPolicy, type QqConfig } from './config';
@@ -120,6 +120,16 @@ import { builtinTitles, findBuiltinScore, parseScore, type Score } from '../soun
 import { resolveBackend } from '../sound/sing';
 import { encodeWave } from '../sound/wav';
 import { Speaker, describeFailure } from '../sound/tts';
+import {
+  characterBlockFor,
+  formatCharacterPersona,
+  loadCharacter,
+  readCharacterConfig,
+  tierFor,
+  type CharacterCard,
+} from './character';
+import { drawImage, readImageGenConfig, type DrawRequest } from './imagegen';
+import { VramDaemon, readVramConfig, ttsFlagsFrom, type TtsFlags } from './vram';
 import { createCommandRvcConverter, type RvcConverter } from '../sound/rvc';
 import type { GroupMessage, ObEvent, ObGroupMessageEvent, ObPrivateMessageEvent, ObSegment, QqAction, SendResult } from './types';
 
@@ -299,6 +309,12 @@ export class QqBridge {
   /** 人物档案：每 10 分钟看一眼要不要做夜间整理 */
   private dossierTimer: ReturnType<typeof setInterval> | undefined;
   private dossierRunning = false;
+  /** 角色卡缓存（按文件修改时间失效） */
+  private characterCache: { mtime: number; card: CharacterCard | undefined } | undefined;
+  /** vram-switcher daemon（第一次生图时才启动） */
+  private vramDaemon: VramDaemon | undefined;
+  /** 同一时间只画一张 */
+  private drawing = false;
   private running = false;
   /** 正在处理中的群（同一个群不并发回复） */
   private readonly busy = new Set<string>();
@@ -802,6 +818,9 @@ export class QqBridge {
       clearInterval(this.dossierTimer);
       this.dossierTimer = undefined;
     }
+    const daemon = this.vramDaemon;
+    this.vramDaemon = undefined;
+    if (daemon !== undefined) await daemon.stop().catch(() => undefined);
     const client = this.client;
     this.client = undefined;
     if (client !== undefined) await client.close();
@@ -1966,10 +1985,19 @@ export class QqBridge {
               : affinity < 60
                 ? '有好感：温和、愿意接话、适度关心。'
                 : '亲近：明显更耐心、更关心、更愿意解释；可以有一点偏爱，但不要无脑舔。';
-      const profileNote =
-        speakerProfile === undefined
+      const card = this.characterCard();
+      const cardTier = card === undefined ? undefined : tierFor(card, affinity);
+      const loreNote =
+        card === undefined
           ? ''
-          : `\n\n【关系与语气（只影响语气，不要把数字念出来）】\n对方：${speakerProfile.name || speakerProfile.qq}；熟识度 ${familiarity}/100（${familiarityTone}）\n好感度 ${affinity}（-100~100，${affinityTone}）\n请按这个关系调整称呼、玩笑尺度、耐心和主动关心的程度。`;
+          : this.characterLore(card, groupId, speakerId, message?.name ?? speakerProfile?.name ?? '', affinity, [
+              ...turns.slice(-readCharacterConfig(this.characterDir()).scanTurns).map((turn) => turn.text),
+              message?.text ?? '',
+            ]);
+      const profileNote =
+        (speakerProfile === undefined
+          ? ''
+          : `\n\n【关系与语气（只影响语气，不要把数字念出来）】\n对方：${speakerProfile.name || speakerProfile.qq}；熟识度 ${familiarity}/100（${familiarityTone}）\n好感度 ${affinity}（-100~100，${cardTier === undefined ? affinityTone : `「${cardTier.name}」：${cardTier.tone}`}）\n请按这个关系调整称呼、玩笑尺度、耐心和主动关心的程度。`) + loreNote;
       const summaryNote =
         group.summary === undefined || group.summary === ''
           ? ''
@@ -2143,7 +2171,7 @@ export class QqBridge {
         );
       })();
       const system = groupSystemPrompt({
-        persona: this.deps.persona(groupId),
+        persona: this.personaFor(groupId, message?.name ?? ''),
         selfName: this.config.selfName,
         mode,
         scene: isPrivateKey(groupId) ? 'private' : 'group',
@@ -2168,6 +2196,10 @@ export class QqBridge {
         ...(() => {
           const dossier = this.dossierBlock(groupId);
           return dossier === '' ? {} : { dossier };
+        })(),
+        ...(() => {
+          const draw = this.drawScope();
+          return draw === undefined ? {} : { allowDraw: draw };
         })(),
         ...(/空间|说说|动态|qzone/i.test(message?.text ?? '') && this.deps.qzoneRecent !== undefined
           ? {
@@ -2322,6 +2354,9 @@ export class QqBridge {
           ? message.messageId
           : undefined;
       let sentCount = await this.deliver(groupId, policy, plan, now, mode, imageSendRequest, selfieRequest, undefined, quoteTarget, plan.emotion, mentionOwner);
+      if (plan.draw !== undefined && this.drawScope() !== undefined) {
+        void this.drawAndSend(groupId, { ...plan.draw, requesterQq: plan.draw.kind === 'selfie' && message === undefined ? '' : (message?.userId ?? '') });
+      }
       if (sentCount > 0) {
         const stat = this.statOf(groupId);
         stat.replied += sentCount;
@@ -2503,6 +2538,7 @@ export class QqBridge {
       ...(tts.provider === 'gpt-sovits'
         ? { pitchSemitones: tts.pitchSemitones, speed: tts.speed }
         : {}),
+      ...this.ttsVram(),
     });
     if (!result.ok) {
       this.recordError(`语音合成失败：${describeFailure(result)}`);
@@ -2566,6 +2602,7 @@ export class QqBridge {
               provider: this.config.tts.provider,
               endpoint: this.config.tts.endpoint,
               style: this.config.tts.style,
+              ...this.ttsVram(),
             });
             if (!result.ok) return { ok: false as const, reason: result.reason, message: describeFailure(result) };
             return { ok: true as const, audio: result.pcm };
@@ -3206,6 +3243,143 @@ export class QqBridge {
   }
 
   /** 把她说的话记进上下文 */
+  // ───────────── 角色卡 / 好感披露（character.ts） ─────────────
+
+  private characterDir(): string {
+    return join(this.deps.userRoot, 'character');
+  }
+
+  /** 当前角色卡；没有、未启用或解析失败返回 undefined（失败只记一次日志） */
+  private characterCard(): CharacterCard | undefined {
+    const dir = this.characterDir();
+    if (!readCharacterConfig(dir).enabled) return undefined;
+    let mtime = 0;
+    for (const name of ['card.json', 'card.png']) {
+      try {
+        mtime = Math.max(mtime, statSync(join(dir, name)).mtimeMs);
+      } catch {
+        // 没有这个文件
+      }
+    }
+    if (this.characterCache?.mtime === mtime) return this.characterCache.card;
+    let card: CharacterCard | undefined;
+    try {
+      card = mtime === 0 ? undefined : loadCharacter(dir);
+      if (card !== undefined) this.log('info', `角色卡已载入：${card.name}（世界书 ${card.lore.length} 条）`);
+    } catch (e) {
+      this.log('warn', `角色卡解析失败（先用原人设）：${e instanceof Error ? e.message : String(e)}`);
+    }
+    this.characterCache = { mtime, card };
+    return card;
+  }
+
+  /** 人设：有角色卡时用卡（或追加在原人设后），否则用原人设 */
+  private personaFor(groupId: string, userName: string): string {
+    const base = this.deps.persona(groupId);
+    const card = this.characterCard();
+    if (card === undefined) return base;
+    const persona = formatCharacterPersona(card, userName || '对方');
+    return readCharacterConfig(this.characterDir()).replacePersona || base.trim() === '' ? persona : `${base}\n\n${persona}`;
+  }
+
+  private characterLore(
+    card: CharacterCard,
+    groupId: string,
+    speakerQq: string,
+    speakerName: string,
+    affinity: number,
+    recent: string[],
+  ): string {
+    try {
+      return characterBlockFor(this.characterDir(), card, readCharacterConfig(this.characterDir()), {
+        isPrivate: isPrivateKey(groupId),
+        speakerQq,
+        speakerName,
+        affinity,
+        recentText: recent.join('\n'),
+      });
+    } catch (e) {
+      this.log('warn', `世界书注入失败（本轮跳过）：${e instanceof Error ? e.message : String(e)}`);
+      return '';
+    }
+  }
+
+  // ───────────── 生图 / 显卡调度（imagegen.ts / vram.ts） ─────────────
+
+  private imagegenDir(): string {
+    return join(this.deps.userRoot, 'imagegen');
+  }
+
+  private vramDir(): string {
+    return join(this.deps.userRoot, 'vram');
+  }
+
+  /** 生图是否可用：undefined = 关闭 */
+  private drawScope(): 'selfie' | 'all' | undefined {
+    try {
+      const cfg = readImageGenConfig(this.imagegenDir());
+      return cfg.enabled ? cfg.scope : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 本地 TTS 网关的 vram-switcher 文件协议参数（Edge 不需要） */
+  private ttsVram(): { vram?: TtsFlags } {
+    if (this.config.tts.provider === 'edge') return {};
+    try {
+      const flags = ttsFlagsFrom(readVramConfig(this.vramDir()));
+      return flags === undefined ? {} : { vram: flags };
+    } catch {
+      return {};
+    }
+  }
+
+  private async drawAndSend(groupId: string, request: DrawRequest): Promise<void> {
+    if (this.drawing) {
+      await this.sendSegments(groupId, [{ type: 'text', data: { text: '手上还有一张没画完，等会儿' } }]);
+      return;
+    }
+    this.drawing = true;
+    try {
+      const dir = this.imagegenDir();
+      const cfg = readImageGenConfig(dir);
+      const vramCfg = readVramConfig(this.vramDir());
+      if (cfg.useVram && vramCfg.enabled && this.vramDaemon === undefined) {
+        this.vramDaemon = new VramDaemon(vramCfg, (level, text) => this.log(level, text));
+      }
+      const daemon = cfg.useVram && vramCfg.enabled ? this.vramDaemon : undefined;
+      const result = await drawImage(dir, cfg, request, {
+        appearance: this.characterCard()?.appearance ?? '',
+        ...(daemon === undefined
+          ? {}
+          : {
+              lease: {
+                acquire: (reason: string) => daemon.acquire('image', reason),
+                release: (reason: string) => daemon.release(reason),
+              },
+            }),
+      });
+      if (result.ok) {
+        const sent = await this.sendSegments(groupId, [{ type: 'image', data: { file: result.file } }]);
+        if (sent.ok) {
+          this.appendAssistant(groupId, `（${request.kind === 'selfie' ? '发了张自拍' : '画了张图'}：${request.prompt.slice(0, 60)}）`, Date.now());
+        } else {
+          this.log('warn', `生图发送失败（${sent.reason}）：${sent.message}`);
+        }
+      } else if (result.userFacing) {
+        await this.sendSegments(groupId, [{ type: 'text', data: { text: result.reason } }]);
+      } else {
+        this.log('warn', `生图失败：${result.reason}`);
+        await this.sendSegments(groupId, [{ type: 'text', data: { text: '画崩了…下次再画' } }]);
+      }
+    } catch (e) {
+      this.log('warn', `生图出错：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      this.drawing = false;
+    }
+  }
+
   // ───────────── 人物档案（dossier.ts） ─────────────
 
   private dossierDir(): string {
@@ -3506,10 +3680,7 @@ export class QqBridge {
  * 单独抽出来是因为「模型给了 8 条但我们最多发 3 条」这种情况必须有确定行为：
  * 截断（保留前面几条），不是随机丢。前面的通常是主回应。
  */
-export function parseReplyPlanSafe(
-  raw: string,
-  policy: GroupPolicy,
-): { messages: string[]; action: 'text' | 'voice' | 'sing'; song?: string } {
+export function parseReplyPlanSafe(raw: string, policy: GroupPolicy): ReturnType<typeof parseReplyPlan> {
   const plan = parseReplyPlan(raw);
   return { ...plan, messages: clampMessages(plan.messages, policy) };
 }

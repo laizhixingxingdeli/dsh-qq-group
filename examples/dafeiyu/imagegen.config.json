@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "endpoint": "http://127.0.0.1:8188",
+  "scope": "all",
+  "width": 832,
+  "height": 1216,
+  "negative": "lowres, bad anatomy, bad hands, extra fingers, blurry, watermark, text, signature",
+  "safetyNegative": "nsfw, nude, naked, nipples, sexual, gore, blood",
+  "appearance": "",
+  "perUserDaily": 5,
+  "totalDaily": 30,
+  "timeoutSeconds": 600,
+  "blockWords": [],
+  "useVram": true
+}

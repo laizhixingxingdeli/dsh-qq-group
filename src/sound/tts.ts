@@ -19,6 +19,7 @@ import { dirname, join } from 'node:path';
 
 import { synthesize as hostSynthesize, type TtsResult } from '../voice';
 import { encodeWave, parseWave, type Pcm } from './wav';
+import { withTtsWindow, type TtsFlags } from '../qq/vram';
 
 /** TTS 合成参数 */
 export interface SpeakOptions {
@@ -38,6 +39,8 @@ export interface SpeakOptions {
   speed?: number;
   /** 跳过缓存（调试用） */
   noCache?: boolean;
+  /** vram-switcher 文件协议（本地网关合成前申请显卡；不传 = 不协调） */
+  vram?: TtsFlags;
 }
 
 /** 合成失败（与宿主的 TtsFailure 同构，另加 ffmpeg 相关） */
@@ -295,7 +298,15 @@ export class Speaker {
             pitch: options.pitch,
             volume: options.volume,
           })
-        : await synthesizeExternal(options.endpoint ?? '', trimmed, options.style ?? '', options.voice ?? '');
+        : options.vram === undefined
+          ? await synthesizeExternal(options.endpoint ?? '', trimmed, options.style ?? '', options.voice ?? '')
+          : await withTtsWindow(options.vram, () =>
+              synthesizeExternal(options.endpoint ?? '', trimmed, options.style ?? '', options.voice ?? ''),
+            ).catch((e: unknown): TtsResult => ({
+              ok: false,
+              reason: 'error',
+              message: e instanceof Error ? e.message : String(e),
+            }));
     if (!result.ok && provider !== 'edge') {
       // 本地 GPT-SoVITS/CosyVoice/Kokoro 网关没启动时，不能把整条语音吞掉。
       console.warn(`[dsh-qq-group] 本地 TTS 失败，回退 Edge：${result.message}`);

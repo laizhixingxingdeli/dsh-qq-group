@@ -84,6 +84,8 @@ export interface PromptInput {
   permanentMemories?: string[];
   /** 人物档案注入块（dossier.ts 生成，已含标题与说明） */
   dossier?: string;
+  /** 允许生图：selfie = 只能自拍；all = 自拍 + 帮人画 */
+  allowDraw?: 'selfie' | 'all';
 }
 
 /** 场合不同，任务不同 */
@@ -320,7 +322,16 @@ export function groupSystemPrompt(input: PromptInput): string {
       `  "action": ${JSON.stringify(actions[0].split('（')[0])},`,
       '  "emotion": "开心|生气|吃惊|中立|难过|厌恶|恐惧（这条回复的情绪，用于语音语气）",',
       '  "song": "（仅 action=sing 时填）",',
-      '  "sticker": "（可选：上面列表里的表情包文件名，不想发就不填）"',
+      input.allowDraw === undefined
+        ? '  "sticker": "（可选：上面列表里的表情包文件名，不想发就不填）"'
+        : '  "sticker": "（可选：上面列表里的表情包文件名，不想发就不填）",',
+      ...(input.allowDraw === undefined
+        ? []
+        : [
+            input.allowDraw === 'all'
+              ? '  "draw": {"kind": "selfie|request", "prompt": "（可选：想发自拍或有人请你画图时才填；prompt 用英文 tag 写画面，例如 1girl, waving, park, sunny）"}'
+              : '  "draw": {"kind": "selfie", "prompt": "（可选：想发自拍或有人要你自拍时才填；prompt 用英文 tag 写动作/表情/场景）"}',
+          ]),
       '}',
       `messages 是你要发的消息，**${burst[0]}~${burst[1]} 条**。`,
       '  - 大多数时候 1 条就够了；想强调、想分成两口气说、或者想先吐槽再补充，才发 2 条以上。',
@@ -329,6 +340,12 @@ export function groupSystemPrompt(input: PromptInput): string {
       '  平时是 text。只有当这句话**说出来比打出来更有味道**（撒娇、唱歌、念诗、语气词很多）才用 voice。',
       '  用 voice 时，messages 里的内容会被朗读，所以写成口语，不要有括号和表情符号。',
       'emotion 必须从七个里选一个，写这条回复真实情绪；拿不准写开心，不要空着。',
+      ...(input.allowDraw === undefined
+        ? []
+        : [
+            'draw 平时不填。只有对方明确让你自拍/画图，或者你真的很想发张自拍时才填；画要花好几十秒，messages 里先说一句「等我画一下」之类的话。',
+            '  不画色情、裸露、血腥、未成年相关、真实人物的东西；被要求画这些就在 messages 里拒绝，不填 draw。',
+          ]),
       input.scene === 'private'
         ? 'thought 是你真正的想法（2~3 句），只会写进日记、不会发出去，可以吐槽、犯花痴、嫌烦、得意——写得像自己。'
         : 'thought 是你真正的想法（2~3 句），不会发到群里，可以吐槽、犯花痴、嫌烦、得意——写得像自己。',

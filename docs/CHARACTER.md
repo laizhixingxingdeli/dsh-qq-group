@@ -1,0 +1,111 @@
+# 酒馆角色卡、好感度披露、IndexTTS 语音、ComfyUI 生图
+
+四个功能互相独立，各自一个配置目录（都在 `$DSH_HOME/dsh-qq-group/` 下，Windows 默认 `%USERPROFILE%\.dsh\dsh-qq-group\`）：
+
+| 功能 | 目录 | 没有配置时 |
+|---|---|---|
+| 酒馆角色卡 + 好感披露 | `character/` | 没有卡就用原来的人设卡 |
+| ComfyUI 生图 | `imagegen/` | 关闭 |
+| vram-switcher 显卡调度 | `vram/` | 关闭（TTS/生图直接调用，不协调显卡） |
+| IndexTTS 语音 | 插件 TTS 设置 + `tools/indextts_gateway.py` | 用原来的 Edge/GPT-SoVITS |
+
+示例文件都在仓库的 `examples/dafeiyu/` 里。
+
+---
+
+## 1. 酒馆角色卡
+
+把卡放到 `character/card.json` 或 `character/card.png`（SillyTavern / Chub 导出的 V1、V2、V3 卡都行；PNG 卡里的 `chara` / `ccv3` 数据会被读出来）。保存后下一条消息生效，不用重启。
+
+- 卡的 `description / personality / scenario / mes_example / system_prompt / post_history_instructions` 组成人设；`{{char}}`、`{{user}}` 会替换成她的名字和当前说话的人。
+- **世界书**（`character_book`）：条目的关键词在最近几条消息里出现时才注入；`constant: true` 的条目一直在。
+- `character/config.json`（可选）：
+
+```json
+{ "enabled": true, "replacePersona": true, "loreChars": 2500, "scanTurns": 8 }
+```
+
+`replacePersona: false` 表示角色卡追加在插件原有人设卡后面，而不是替换。
+
+## 2. 好感度披露：按好感慢慢说出自己的设定
+
+在卡里加 `extensions.dafeiyu`（酒馆会忽略这些字段，卡在酒馆里照常用）：
+
+```jsonc
+"extensions": { "dafeiyu": {
+  "groupMaxAffinity": 60,   // 群里最多按 60 的好感解锁（一群人面前不说最私密的事）
+  "newRevealTurns": 3,      // 新解锁的设定，接下来 3 次回复里提示她找机会说
+  "appearance": "1girl, blue hair, whale tail",   // 自拍用的外形 tag
+  "tiers": [ { "min": 0, "name": "普通", "tone": "…" }, { "min": 40, "name": "朋友", "tone": "…" } ]
+}}
+```
+
+世界书条目里加门槛：
+
+```jsonc
+{ "name": "想看海", "content": "她的愿望是…",
+  "extensions": { "dafeiyu": { "minAffinity": 75, "privateOnly": true,
+                               "lockedHint": "被问有什么愿望，就说想吃一整盆虾糊弄过去" } } }
+```
+
+规则：
+
+| 情况 | 她看到的 |
+|---|---|
+| 好感够、场合对 | 条目正文（解锁后一直知道，可以自然流露） |
+| 刚解锁 | 额外提示「你最近更信任 TA 了，找个自然的时机慢慢说」 |
+| 好感不够或 `privateOnly` 在群里，但被问到了 | 只有 `lockedHint`（怎么搪塞），**看不到正文**，所以不会说漏 |
+| 主动开口（没有对话对象） | 有门槛的条目一律不带 |
+
+- 好感用的是插件原有的好感度（每群每人），档位语气 `tiers` 会代替插件内置的五档。
+- 解锁是**按人记录**的（`character/revealed.json`）：告诉过小王的秘密，阿杰那边仍然是秘密。想让某人「重新开始」，删掉这个文件里他的 QQ 号那一段即可。
+
+`examples/dafeiyu/card.json` 是一张完整的大肥鱼卡，有 7 层设定，从「讨厌被叫大肥鱼」到只对挚友说的心里话。
+
+## 3. IndexTTS 语音
+
+1. 装好 IndexTTS（2.x 推荐），把 `tools/indextts_gateway.py` 复制到 IndexTTS 目录。
+2. 准备参考音频：`D:\AI\voices\dafeiyu.wav`（3~10 秒干净人声）。
+3. 用 IndexTTS 自己的 Python 启动网关（**不接 vram-switcher 时**手动启动；接了就交给它启动）：
+
+```bash
+D:\AI\IndexTTS\.venv\Scripts\python.exe indextts_gateway.py --model-dir checkpoints --voices D:\AI\voices --default-voice dafeiyu --port 7861 --fp16
+```
+
+4. 插件 TTS 设置：引擎选 **GPT-SoVITS（本地网关）**，网关地址 `http://127.0.0.1:7861`，音色填 `dafeiyu`。回复的情绪（开心/生气…）会作为 IndexTTS2 的情绪文本。
+5. 网关挂了或超时，插件会自动回退 Edge，不会吞掉这条语音。
+
+## 4. ComfyUI 生图（自拍 + 帮人画）
+
+1. 在 ComfyUI 里搭好工作流，菜单「导出（API）」存为 `imagegen/workflow.json`；自拍想用单独的工作流（比如带角色 LoRA）就再存一份 `imagegen/workflow-selfie.json`。
+   工作流里写占位符：`{{prompt}}`、`{{negative}}`、`{{seed}}`、`{{width}}`、`{{height}}`。`examples/dafeiyu/workflow.json` 是最简单的 SDXL 文生图，**记得把 `ckpt_name` 换成你自己的模型文件名**。
+2. 把 `examples/dafeiyu/imagegen.config.json` 复制成 `imagegen/config.json`，`enabled: true`。
+3. 她在回复里决定画不画（`draw` 字段）：对方说「自拍一张」「画只猫」时，她先回一句「等我画一下」，画好再发图。
+
+安全与限制：
+
+- 提示词先过黑名单（色情、裸露、血腥、未成年相关），命中直接拒绝，**不会去占显卡**；反向提示词永远带 `safetyNegative`；可以在 `blockWords` 里加词。
+- `perUserDaily`（每人每天）、`totalDaily`（全局每天）次数上限；同一时间只画一张。
+- `scope: "selfie"` 只允许自拍。
+- 自拍会在提示词前面加上角色卡的 `appearance`（没有就用配置里的 `appearance`）。
+
+## 5. vram-switcher：语音和生图轮流用一张卡
+
+对话走 DeepSeek 云端，显卡只给 IndexTTS 和 ComfyUI 用。12GB 卡两个同时常驻会爆显存，[vram-switcher](https://github.com/xiaoxiao150/vram-switcher) 负责轮流：
+
+- 生图前：插件启动 vram-switcher 的 daemon，`acquire(image)` → 它停掉 TTS 网关、拉起 ComfyUI、等端口就绪 → 出图 → `release` → 它等队列跑空、停 ComfyUI。
+- 语音前：插件写 `tts_busy.flag` → 它确保 TTS 网关在线后写 `tts_ready.flag` → 插件合成 → 删 busy。
+
+配置：
+
+1. `git clone https://github.com/xiaoxiao150/vram-switcher D:\AI\vram-switcher`，按它的 README 建虚拟环境、装依赖。
+2. 把 `examples/dafeiyu/vram-switcher.profile.local.json` 复制成 `D:\AI\vram-switcher\profile.local.json`，改成你的实际路径（`llm.enabled` 保持 `false`）。
+3. 把 `examples/dafeiyu/vram.config.json` 复制成 `vram/config.json`，路径对上；`ttsBusyFlag/ttsReadyFlag` 不写时默认是 `<dataDir>/tts_busy.flag`、`tts_ready.flag`，**必须和 profile 里的一致**。
+4. **不要再安装 vram-switcher 的 DSH 插件**——daemon 由本插件启动，两个调度器会抢同一套进程。
+
+## 测试
+
+```bash
+node tests/character.test.mjs
+node tests/imagegen.test.mjs
+```

@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "python": "D:/AI/vram-switcher/.venv/Scripts/python.exe",
+  "switcherDir": "D:/AI/vram-switcher",
+  "profile": "D:/AI/vram-switcher/profile.local.json",
+  "dataDir": "D:/AI/vram-switcher/data",
+  "ttsPort": 7861,
+  "ttsWaitSeconds": 150,
+  "leaseSeconds": 900
+}

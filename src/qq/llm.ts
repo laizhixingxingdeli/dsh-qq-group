@@ -201,6 +201,8 @@ export interface ReplyPlan {
   thought?: string;
   /** 这条回复的情绪（用于 GPT-SoVITS 选参考音） */
   emotion?: string;
+  /** 想画的图（自拍或帮人画；由 bridge 按配置和次数限制决定画不画） */
+  draw?: { kind: 'selfie' | 'request'; prompt: string };
 }
 
 export function parseReplyPlan(raw: string): ReplyPlan {
@@ -216,6 +218,7 @@ export function parseReplyPlan(raw: string): ReplyPlan {
         sticker?: unknown;
         thought?: unknown;
         emotion?: unknown;
+        draw?: unknown;
       };
       const messages = Array.isArray(parsed.messages)
         ? parsed.messages.filter((m): m is string => typeof m === 'string').map((m) => m.trim()).filter((m) => m !== '')
@@ -231,6 +234,12 @@ export function parseReplyPlan(raw: string): ReplyPlan {
           typeof parsed.emotion === 'string' && /^(开心|生气|吃惊|中立|难过|厌恶|恐惧)$/.test(parsed.emotion.trim())
             ? parsed.emotion.trim()
             : undefined;
+        const drawRaw =
+          parsed.draw !== null && typeof parsed.draw === 'object' ? (parsed.draw as { kind?: unknown; prompt?: unknown }) : undefined;
+        const draw =
+          drawRaw !== undefined && typeof drawRaw.prompt === 'string' && drawRaw.prompt.trim() !== ''
+            ? { kind: drawRaw.kind === 'selfie' ? ('selfie' as const) : ('request' as const), prompt: drawRaw.prompt.trim().slice(0, 400) }
+            : undefined;
         return {
           messages,
           action,
@@ -238,6 +247,7 @@ export function parseReplyPlan(raw: string): ReplyPlan {
           ...(sticker === undefined ? {} : { sticker }),
           ...(thought === undefined ? {} : { thought }),
           ...(emotion === undefined ? {} : { emotion }),
+          ...(draw === undefined ? {} : { draw }),
         };
       }
     } catch {
