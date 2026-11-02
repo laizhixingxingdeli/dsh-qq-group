@@ -151,8 +151,8 @@ cd D:\AI\index-tts
 **单独验收网关**（另开一个窗口）：
 
 ```bash
-curl http://127.0.0.1:7861/health
-curl -X POST http://127.0.0.1:7861/tts -H "content-type: application/json" -d "{\"text\":\"你好呀\",\"style\":\"开心\",\"voice\":\"dafeiyu\"}" --output test.wav
+curl --noproxy "*" http://127.0.0.1:7861/health
+curl --noproxy "*" -X POST http://127.0.0.1:7861/tts -H "content-type: application/json" -d "{\"text\":\"你好呀\",\"style\":\"开心\",\"voice\":\"dafeiyu\"}" --output test.wav
 ```
 
 能播放 `test.wav` 就说明网关没问题。
@@ -307,6 +307,7 @@ DSH 日志里以 `[vram]` 开头的行是 vram-switcher 的输出，有问题先
 
 | 现象 | 原因 / 处理 |
 |---|---|
+| 测试或 curl 访问 `127.0.0.1` 返回 502 Bad Gateway | 开着代理软件（Clash 等），本机请求被转给了代理。curl 加 `--noproxy "*"`；或在代理软件里把 `127.0.0.1`、`localhost` 设为直连 |
 | `dsh plugin add` 报 `installation rejected … incompatible with dsh` | DSH 版本超出 `0.2.x` 范围，见「版本要求」 |
 | 日志：`角色卡解析失败` | `card.json` 不是合法 JSON（多半是逗号或引号问题），或者文件编码不是 UTF-8 |
 | 她说出了还没解锁的秘密 | 检查那条设定的 `minAffinity` 是否写在 `extensions.dafeiyu` 里面，写在别处不生效；再看 `revealed.json` 里这个人是不是早就解锁过 |

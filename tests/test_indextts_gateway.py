@@ -20,6 +20,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 
+# 只连本机：不走系统代理（Windows 上开着 Clash/v2rayN 时，urllib 会把 127.0.0.1 也发给代理，返回 502）
+LOCAL = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 CALLS: list[dict] = []
 INITS: list[dict] = []
 
@@ -68,7 +71,7 @@ def start(gateway, version: str, model_dir: str, voices: str):
 
 def post(base: str, payload: dict) -> bytes:
     req = urllib.request.Request(f"{base}/tts", data=json.dumps(payload).encode(), headers={"content-type": "application/json"})
-    return urllib.request.urlopen(req).read()
+    return LOCAL.open(req).read()
 
 
 def main() -> None:
@@ -80,7 +83,7 @@ def main() -> None:
 
     # 1. 2.5：用 infer_v2_5、BF16、带 lang；「开心」变成情绪向量第 0 维；路径穿越回落到默认音色
     server, base = start(gateway, "2.5", tmp, tmp)
-    assert json.load(urllib.request.urlopen(f"{base}/health"))["engine"] == "2.5"
+    assert json.load(LOCAL.open(f"{base}/health"))["engine"] == "2.5"
     assert INITS[-1].get("use_bf16") is True and "use_fp16" not in INITS[-1]
     assert "use_qwen_emo" not in INITS[-1], "默认不加载 Qwen 情绪模型"
     assert post(base, {"text": "你好呀", "style": "开心", "voice": "../../evil"})[:4] == b"RIFF"
