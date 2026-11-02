@@ -10,7 +10,7 @@
 |---|---|---|---|
 | 0 | 装好插件本体（本分支） | 否 | — |
 | 1 | 角色卡 + 好感披露 | 否 | 用原来的人设卡 |
-| 2 | IndexTTS 语音 | 是 | 用 Edge 语音 |
+| 2 | 本地语音：IndexTTS（2A）**或** CosyVoice3（2B），二选一 | 是 | 用 Edge 语音 |
 | 3 | ComfyUI 生图 | 是 | 不能自拍/画图 |
 | 4 | vram-switcher 串起来 | 是 | 2、3 同时常驻，12GB 卡容易爆显存 |
 
@@ -37,6 +37,7 @@ D:\AI\vram-switcher                  vram-switcher
 | pnpm | ≥ 9 | DSH 用 PATH 里的 pnpm 管理插件 |
 | NapCat | 支持 OneBot 11 正向 WebSocket 的版本 | 见主部署指南 |
 | IndexTTS | **2.5（官方默认）或 2** | 用 uv 安装（官方要求）；CUDA Toolkit 12.8+；2.5 模型放 `checkpoints`，2 放 `checkpoints_2` |
+| CosyVoice3 | **Fun-CosyVoice3-0.5B-2512** | 官方要求 conda + Python 3.10、torch 2.3.1；Windows 上不支持 TensorRT/DeepSpeed（requirements 已自动跳过），文本规整用 wetext，不需要 pynini |
 | ComfyUI | 带 HTTP API 的版本（`/prompt`、`/history`、`/view`） | 便携版即可 |
 | vram-switcher | Python ≥ 3.10，依赖 `psutil` | 只在 N 卡 Windows 上实测过 |
 | 显卡 | N 卡 12GB+ | 8GB 也能跑，但要用 SD1.5 或低显存模式 |
@@ -99,9 +100,20 @@ node tests/imagegen.test.mjs
 
 ---
 
-## 2. IndexTTS 语音
+## 2. 本地语音（二选一）
 
-### 2.1 安装 IndexTTS（官方方式：uv）
+| | IndexTTS（2A） | CosyVoice3（2B） |
+|---|---|---|
+| 安装方式 | uv（官方） | conda + Python 3.10（官方） |
+| 音色 | 一段参考音频 | 参考音频 **+ 逐字稿**（没有逐字稿也能用，但像度差一些） |
+| 情绪 | 8 维情绪向量，比较细 | 训练过的几种指令：非常开心 / 非常伤心 / 非常生气 / 小声 |
+| 网关脚本 | `tools/indextts_gateway.py` | `tools/cosyvoice_gateway.py` |
+
+两个网关对插件来说完全一样（同一个协议、同一个端口 7861），**插件设置不用改**，换网关只需要换启动命令。只装一个就行。
+
+## 2A. IndexTTS 语音
+
+### 2A.1 安装 IndexTTS（官方方式：uv）
 
 ```bash
 cd D:\AI
@@ -114,7 +126,7 @@ uv sync --extra webui --default-index "https://mirrors.aliyun.com/pypi/simple"
 - Windows 上 DeepSpeed 很难装，所以这里没用 `--all-extras`。
 - 安装时如果出现 CUDA 报错，先装 NVIDIA **CUDA Toolkit 12.8 或更新版本**。
 
-### 2.2 下载模型（2.5）
+### 2A.2 下载模型（2.5）
 
 ```bash
 uv tool install "huggingface-hub"
@@ -130,11 +142,11 @@ hf download IndexTeam/IndexTTS-2.5 --local-dir=checkpoints
 uv run tools/gpu_check.py
 ```
 
-### 2.3 准备音色
+### 2A.3 准备音色
 
 `D:\AI\voices\dafeiyu.wav`：3~10 秒、一个人说话、没有背景音乐的干净录音。**只用你有权使用的声音**，不要拿真人声优或主播的声音做音色。
 
-### 2.4 启动网关
+### 2A.4 启动网关
 
 把仓库里的 `tools\indextts_gateway.py` 复制到 `D:\AI\index-tts\`（和 `webui.py` 放在同一级），然后运行：
 
@@ -157,7 +169,7 @@ curl --noproxy "*" -X POST http://127.0.0.1:7861/tts -H "content-type: applicati
 
 能播放 `test.wav` 就说明网关没问题。
 
-### 2.5 插件设置
+### 2A.5 插件设置
 
 DSH 设置 →「QQ 群聊」→ 语音：
 
@@ -169,6 +181,63 @@ DSH 设置 →「QQ 群聊」→ 语音：
 **验收**：在群里说「发条语音」，她发来的应该是 IndexTTS 的音色。如果听到的是 Edge 的标准女声，说明网关没连上，去 DSH 日志里搜「本地 TTS 失败」查原因。
 
 ---
+
+## 2B. CosyVoice3 语音
+
+### 2B.1 安装 CosyVoice（官方方式：conda）
+
+```bash
+cd D:\AI
+git clone --recursive https://github.com/FunAudioLLM/CosyVoice.git
+cd CosyVoice
+git submodule update --init --recursive
+conda create -n cosyvoice -y python=3.10
+conda activate cosyvoice
+pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host=mirrors.aliyun.com
+```
+
+- `--recursive` 和 `git submodule update` 不能省：网关依赖子模块 `third_party\Matcha-TTS`。
+- requirements 里的 deepspeed、tensorrt、onnxruntime-gpu 只在 Linux 上装，Windows 会自动跳过，这是正常的。
+- 如果 torch 装成了 CPU 版（`python -c "import torch;print(torch.cuda.is_available())"` 输出 False），按 requirements 顶部的 `--extra-index-url https://download.pytorch.org/whl/cu121` 重新装 `torch==2.3.1 torchaudio==2.3.1`。
+
+### 2B.2 下载模型
+
+```bash
+conda activate cosyvoice
+python -c "from modelscope import snapshot_download; snapshot_download('FunAudioLLM/Fun-CosyVoice3-0.5B-2512', local_dir='pretrained_models/Fun-CosyVoice3-0.5B')"
+```
+
+下载完，`pretrained_models\Fun-CosyVoice3-0.5B\cosyvoice3.yaml` 应该存在。`CosyVoice-ttsfrd` 只能在 Linux 上用，Windows 不用下载。
+
+### 2B.3 准备音色
+
+```text
+D:\AI\voices\dafeiyu.wav   3~10 秒、一个人、干净无背景音乐（只用你有权使用的声音）
+D:\AI\voices\dafeiyu.txt   这段音频里说的话，一字不差，UTF-8 编码
+```
+
+有逐字稿，网关会做**零样本克隆**，音色最像；没有逐字稿，会退回**跨语种模式**，能用但像度差一些。启动日志会写明每个音色用的是哪种模式。
+
+### 2B.4 启动网关
+
+把仓库里的 `tools\cosyvoice_gateway.py` 复制到 `D:\AI\CosyVoice\`（和 `webui.py` 放在同一级），然后运行：
+
+```bash
+cd D:\AI\CosyVoice
+conda activate cosyvoice
+python cosyvoice_gateway.py --model-dir pretrained_models/Fun-CosyVoice3-0.5B --voices D:\AI\voices --default-voice dafeiyu --port 7861 --fp16
+```
+
+看到 `[gateway] 监听 http://127.0.0.1:7861` 就说明启动好了。
+
+- `--speed 1.1`：语速稍快一点。
+- `--no-emotion`：不切换语气，一直用零样本克隆，音色最稳。
+
+**单独验收**：和 2A.4 一样，用 `curl --noproxy "*"` 调 `/health` 和 `/tts`。`/health` 的返回里会列出识别到的音色。
+
+### 2B.5 插件设置
+
+和 2A.5 完全一样：引擎选 **GPT-SoVITS（本地网关）**，地址 `http://127.0.0.1:7861`，音色 `dafeiyu`。
 
 ## 3. ComfyUI 生图
 
@@ -243,10 +312,10 @@ mkdir data
 
 ### 4.2 profile
 
-1. 把本仓库的 `examples\dafeiyu\vram-switcher.profile.local.json` 复制成 `D:\AI\vram-switcher\profile.local.json`。
+1. 把本仓库的 `examples\dafeiyu\vram-switcher.profile.local.json`（IndexTTS 用）或 `vram-switcher.profile.cosyvoice.json`（CosyVoice3 用），复制成 `D:\AI\vram-switcher\profile.local.json`。
 2. 按你的实际情况改：
    - 文件里所有 `D:/AI/...` 路径（**用正斜杠**）；
-   - `services.tts.versions.2.5.args`，要和 2.4 里你手动启动网关的命令一致；
+   - `services.tts.versions` 里的启动命令，要和你在 2A.4 或 2B.4 里手动启动网关的命令一致。CosyVoice3 要写 conda 环境里 `python.exe` 的完整路径，比如 `C:/Users/你的用户名/miniconda3/envs/cosyvoice/python.exe`；
    - `services.image.start.args`，ComfyUI 便携版的 `python_embeded\python.exe` 和 `main.py`。
 3. `services.llm.enabled` 保持 `false`：对话走云端，不需要调度本地大模型。
 
@@ -312,6 +381,9 @@ DSH 日志里以 `[vram]` 开头的行是 vram-switcher 的输出，有问题先
 | 日志：`角色卡解析失败` | `card.json` 不是合法 JSON（多半是逗号或引号问题），或者文件编码不是 UTF-8 |
 | 她说出了还没解锁的秘密 | 检查那条设定的 `minAffinity` 是否写在 `extensions.dafeiyu` 里面，写在别处不生效；再看 `revealed.json` 里这个人是不是早就解锁过 |
 | 语音一直是 Edge 的声音 | 网关没启动或端口不对；或者接了 vram-switcher 后 150 秒内没就绪（看 `tts.log`） |
+| CosyVoice 网关报 `没有 cosyvoice3.yaml` | `--model-dir` 没指向 Fun-CosyVoice3-0.5B 目录，或者模型没下载完 |
+| CosyVoice 网关报 `No module named 'matcha'` | 克隆时没加 `--recursive`：在 CosyVoice 目录运行 `git submodule update --init --recursive` |
+| CosyVoice 音色不像 | 给参考音频配上逐字稿 `.txt`，并确认内容一字不差 |
 | 网关启动报 `找不到 …config.yaml` | `--model-dir` 指错了：2.5 用 `checkpoints`，2 用 `checkpoints_2` |
 | 网关日志：`情绪参数被拒` | 当前 IndexTTS 版本不接受情绪参数，网关会自动退回无情绪合成，语音不受影响 |
 | 生图回「画崩了」 | 看 ComfyUI 窗口的报错，最常见的是 `ckpt_name` 和模型文件名对不上 |
@@ -325,6 +397,7 @@ node tests/dossier.test.mjs
 node tests/character.test.mjs
 node tests/imagegen.test.mjs
 python tests/test_indextts_gateway.py
+python tests/test_cosyvoice_gateway.py
 ```
 
-最后一条用假引擎测网关协议，不需要显卡，用系统里任意 Python 3.10+ 都能跑。
+最后两条用假引擎测网关协议，不需要显卡，用系统里任意 Python 3.10+ 都能跑。

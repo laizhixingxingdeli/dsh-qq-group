@@ -62,7 +62,10 @@
 
 `examples/dafeiyu/card.json` 是一张完整的大肥鱼卡：约 2000 字人设、10 段示范对话、7 档好感语气、16 条世界书（8 条人人可见，8 条按好感 20→92 逐步解锁，其中 3 条只在私聊说）。
 
-## 3. IndexTTS 语音
+## 3. 本地语音：IndexTTS 或 CosyVoice3
+
+两个网关协议相同，插件设置一样，二选一即可。CosyVoice3 用 `tools/cosyvoice_gateway.py`：参考音频配逐字稿时做零样本克隆，没有逐字稿退回跨语种模式；情绪映射到 CosyVoice3 训练过的指令（非常开心 / 非常伤心 / 非常生气 / 小声）。下面是 IndexTTS 的说明。
+
 
 `tools/indextts_gateway.py` 把 IndexTTS（2.5 或 2）包成插件的「本地 TTS 网关」协议（`GET /health`、`POST /tts`）。模型加载完才开端口，所以「端口能连上 = 可以合成」，正好对应 vram-switcher 的就绪判断。
 
@@ -70,7 +73,7 @@
 - 回复的情绪（开心/生气/委屈…）默认转成 IndexTTS 的 8 维情绪向量，2 和 2.5 都支持，不额外占显存；`--emo-text` 改为让 IndexTTS 从文字理解情绪（2.5 会加载 Qwen 情绪模型）；
 - 情绪参数被当前版本拒绝时，自动退回无情绪合成；网关挂了，插件自动退回 Edge。
 
-安装和启动步骤见 [DEPLOY.md](DEPLOY.md#2-indextts-语音)。
+安装和启动步骤见 [DEPLOY.md](DEPLOY.md#2a-indextts-语音)（CosyVoice3 见 [2B](DEPLOY.md#2b-cosyvoice3-语音)）。
 
 ## 4. ComfyUI 生图（自拍 + 帮人画）
 
