@@ -26,17 +26,19 @@
       "flag_stale_seconds": 900,
       "start_cooldown_seconds": 150,
       "version_selector": "auto",
-      "default_version": "2",
+      "default_version": "2.5",
       "detect": {
-        "2": [
+        "2.5": [
           "indextts_gateway.py"
         ]
       },
       "versions": {
-        "2": {
+        "2.5": {
           "args": [
-            "D:/AI/IndexTTS/.venv/Scripts/python.exe",
-            "D:/AI/IndexTTS/indextts_gateway.py",
+            "D:/AI/index-tts/.venv/Scripts/python.exe",
+            "D:/AI/index-tts/indextts_gateway.py",
+            "--version",
+            "2.5",
             "--model-dir",
             "checkpoints",
             "--voices",
@@ -45,11 +47,12 @@
             "dafeiyu",
             "--port",
             "7861",
-            "--fp16"
+            "--half"
           ],
-          "cwd": "D:/AI/IndexTTS",
+          "cwd": "D:/AI/index-tts",
           "env": {
-            "PYTHONUNBUFFERED": "1"
+            "PYTHONUNBUFFERED": "1",
+            "HF_ENDPOINT": "https://hf-mirror.com"
           },
           "log_file": "D:/AI/vram-switcher/data/tts.log"
         }
@@ -73,13 +76,13 @@
       },
       "start": {
         "args": [
-          "D:/AI/ComfyUI/python_embeded/python.exe",
+          "D:/AI/ComfyUI_windows_portable/python_embeded/python.exe",
           "-u",
           "-s",
-          "D:/AI/ComfyUI/ComfyUI/main.py",
+          "D:/AI/ComfyUI_windows_portable/ComfyUI/main.py",
           "--windows-standalone-build"
         ],
-        "cwd": "D:/AI/ComfyUI/ComfyUI",
+        "cwd": "D:/AI/ComfyUI_windows_portable/ComfyUI",
         "log_file": "D:/AI/vram-switcher/data/comfyui.log"
       },
       "ready": {

@@ -9,7 +9,7 @@
 | vram-switcher 显卡调度 | `vram/` | 关闭（TTS/生图直接调用，不协调显卡） |
 | IndexTTS 语音 | 插件 TTS 设置 + `tools/indextts_gateway.py` | 用原来的 Edge/GPT-SoVITS |
 
-示例文件都在仓库的 `examples/dafeiyu/` 里。
+示例文件都在仓库的 `examples/dafeiyu/` 里；**一步步怎么装见 [DEPLOY.md](DEPLOY.md)**。
 
 ---
 
@@ -60,20 +60,17 @@
 - 好感用的是插件原有的好感度（每群每人），档位语气 `tiers` 会代替插件内置的五档。
 - 解锁是**按人记录**的（`character/revealed.json`）：告诉过小王的秘密，阿杰那边仍然是秘密。想让某人「重新开始」，删掉这个文件里他的 QQ 号那一段即可。
 
-`examples/dafeiyu/card.json` 是一张完整的大肥鱼卡，有 7 层设定，从「讨厌被叫大肥鱼」到只对挚友说的心里话。
+`examples/dafeiyu/card.json` 是一张完整的大肥鱼卡：约 2000 字人设、10 段示范对话、7 档好感语气、16 条世界书（8 条人人可见，8 条按好感 20→92 逐步解锁，其中 3 条只在私聊说）。
 
 ## 3. IndexTTS 语音
 
-1. 装好 IndexTTS（2.x 推荐），把 `tools/indextts_gateway.py` 复制到 IndexTTS 目录。
-2. 准备参考音频：`D:\AI\voices\dafeiyu.wav`（3~10 秒干净人声）。
-3. 用 IndexTTS 自己的 Python 启动网关（**不接 vram-switcher 时**手动启动；接了就交给它启动）：
+`tools/indextts_gateway.py` 把 IndexTTS（2.5 或 2）包成插件的「本地 TTS 网关」协议（`GET /health`、`POST /tts`）。模型加载完才开端口，所以「端口能连上 = 可以合成」，正好对应 vram-switcher 的就绪判断。
 
-```bash
-D:\AI\IndexTTS\.venv\Scripts\python.exe indextts_gateway.py --model-dir checkpoints --voices D:\AI\voices --default-voice dafeiyu --port 7861 --fp16
-```
+- `--version 2.5 --model-dir checkpoints`（官方默认）或 `--version 2 --model-dir checkpoints_2`；
+- 回复的情绪（开心/生气/委屈…）默认转成 IndexTTS 的 8 维情绪向量，2 和 2.5 都支持，不额外占显存；`--emo-text` 改为让 IndexTTS 从文字理解情绪（2.5 会加载 Qwen 情绪模型）；
+- 情绪参数被当前版本拒绝时，自动退回无情绪合成；网关挂了，插件自动退回 Edge。
 
-4. 插件 TTS 设置：引擎选 **GPT-SoVITS（本地网关）**，网关地址 `http://127.0.0.1:7861`，音色填 `dafeiyu`。回复的情绪（开心/生气…）会作为 IndexTTS2 的情绪文本。
-5. 网关挂了或超时，插件会自动回退 Edge，不会吞掉这条语音。
+安装和启动步骤见 [DEPLOY.md](DEPLOY.md#2-indextts-语音)。
 
 ## 4. ComfyUI 生图（自拍 + 帮人画）
 
