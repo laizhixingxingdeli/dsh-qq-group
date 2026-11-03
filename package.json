@@ -1,6 +1,6 @@
 {
   "name": "dsh-qq-group",
-  "version": "1.27.0+dafeiyu.5",
+  "version": "1.27.0+dafeiyu.6",
   "description": "独立的 DSH QQ 群聊插件：人设、主动/被动搭话、DSH 模型选择；与桌宠数据/记忆完全分开",
   "type": "module",
   "main": "lib/index.js",
@@ -56,6 +56,7 @@
     "test:character": "node tests/character.test.mjs",
     "test:imagegen": "node tests/imagegen.test.mjs",
     "test:vram-tts": "node tests/vram-cold-tts.test.mjs",
+    "test:proactive-restart": "node tests/proactive-restart.test.mjs",
     "test:gateway": "python tests/test_indextts_gateway.py && python tests/test_cosyvoice_gateway.py",
     "test": "npm run test:memory && npm run test:proactive && npm run test:mood && npm run test:voice && npm run test:reply && npm run test:private"
   },

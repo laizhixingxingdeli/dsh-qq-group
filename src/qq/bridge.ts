@@ -735,6 +735,10 @@ export class QqBridge {
       this.statOf(groupId);
       if (lastUser !== undefined) state.lastHumanAt = lastUser.ts;
       if (lastSelf !== undefined) state.lastSelfAt = lastSelf.ts;
+      // 主动开口的账（上次主动/尝试时间、当天次数）只在内存里，重启就丢。
+      // 保守地把她最后说的那句当作「试过一次」，主动开口从那时起重新计时；
+      // 不然一重启间隔和冷却全部失效，她会马上又去主动开口。
+      if (lastSelf !== undefined) state.lastProactiveTryAt = lastSelf.ts;
       if (policy.proactive.enabled && state.lastHumanAt !== undefined) {
         state.nextProactiveAt =
           now +
@@ -2908,6 +2912,9 @@ export class QqBridge {
           state.nextProactiveAt = now + policy.proactive.intervalMs;
           this.log('info', `群 ${groupId} 主动搭话命中，但试运行开着（掷 ${roll.roll.toFixed(1)} / 命中线 ${lineText}），不发送`);
         } else {
+          // 命中就先记一次尝试：生成失败走不到 noteSelfSpoke，不记的话每轮巡检（30 秒）都会重掷
+          state.lastProactiveTryAt = now;
+          state.nextProactiveAt = now + policy.proactive.intervalMs;
           this.log('info', `群 ${groupId} 主动搭话命中：掷 ${roll.roll.toFixed(1)} / 命中线 ${lineText}`);
           void this.replyTo(groupId, policy, undefined, 'proactive', now).catch((e) => {
             this.recordError(`主动开口异常：${e instanceof Error ? e.message : String(e)}`);
