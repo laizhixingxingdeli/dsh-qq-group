@@ -311,7 +311,7 @@ export class QqBridge {
   private dossierRunning = false;
   /** 角色卡缓存（按文件修改时间失效） */
   private characterCache: { mtime: number; card: CharacterCard | undefined } | undefined;
-  /** vram-switcher daemon（第一次生图时才启动） */
+  /** vram-switcher daemon（语音和生图共用） */
   private vramDaemon: VramDaemon | undefined;
   /** 同一时间只画一张 */
   private drawing = false;
@@ -3328,7 +3328,15 @@ export class QqBridge {
   private ttsVram(): { vram?: TtsFlags } {
     if (this.config.tts.provider === 'edge') return {};
     try {
-      const flags = ttsFlagsFrom(readVramConfig(this.vramDir()));
+      const cfg = readVramConfig(this.vramDir());
+      const flags = ttsFlagsFrom(cfg);
+      if (flags !== undefined) {
+        this.vramDaemon ??= new VramDaemon(cfg, (level, text) => this.log(level, text));
+        // 首次语音也要启动 daemon，文件协议才能收到 ready；后续生图复用它。
+        void this.vramDaemon.request('status').catch((e) => {
+          this.log('warn', `语音显卡调度启动失败：${e instanceof Error ? e.message : String(e)}`);
+        });
+      }
       return flags === undefined ? {} : { vram: flags };
     } catch {
       return {};

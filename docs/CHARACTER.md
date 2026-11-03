@@ -93,8 +93,9 @@
 
 对话走 DeepSeek 云端，显卡只给 IndexTTS 和 ComfyUI 用。12GB 卡两个同时常驻会爆显存，[vram-switcher](https://github.com/xiaoxiao150/vram-switcher) 负责轮流：
 
-- 生图前：插件启动 vram-switcher 的 daemon，`acquire(image)` → 它停掉 TTS 网关、拉起 ComfyUI、等端口就绪 → 出图 → `release` → 它等队列跑空、停 ComfyUI。
+- 生图前：插件 `acquire(image)` → 它停掉 TTS 网关、拉起 ComfyUI、等端口就绪 → 出图 → `release` → 它等队列跑空、停 ComfyUI。
 - 语音前：插件写 `tts_busy.flag` → 它确保 TTS 网关在线后写 `tts_ready.flag` → 插件合成 → 删 busy。
+- daemon 由插件在第一次语音或第一次生图时启动，之后两边共用。语音也得先把它拉起来：`tts_busy.flag` 是它在盯，它没启动就没人响应，只能干等到 `ttsWaitSeconds` 超时。
 
 配置：
 
