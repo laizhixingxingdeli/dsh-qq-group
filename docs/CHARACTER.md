@@ -95,7 +95,9 @@
 
 - 生图前：插件 `acquire(image)` → 它停掉 TTS 网关、拉起 ComfyUI、等端口就绪 → 出图 → `release` → 它等队列跑空、停 ComfyUI。
 - 语音前：插件写 `tts_busy.flag` → 它确保 TTS 网关在线后写 `tts_ready.flag` → 插件合成 → 删 busy。
-- daemon 由插件在第一次语音或第一次生图时启动，之后两边共用。语音也得先把它拉起来：`tts_busy.flag` 是它在盯，它没启动就没人响应，只能干等到 `ttsWaitSeconds` 超时。
+- daemon 由插件启动，语音和生图共用。用本地语音时插件一启动就拉起 daemon 并让它把语音网关预热起来（CosyVoice 开机后第一次加载可能要几分钟），不等第一句语音。`tts_busy.flag` 是 daemon 在盯，它没启动就没人响应，只能干等到 `ttsWaitSeconds` 超时。
+- 上一轮留下的 `tts_ready.flag` 插件不删：两句语音间隔不到 2 秒时，daemon 看不到中间 busy 消失，不会再写一次 ready。ready 在、端口也通，就直接合成。
+- 上游 vram-switcher 要先打 `examples/dafeiyu/vram-switcher-fixes.patch`，原因见 [DEPLOY.md](DEPLOY.md#41-安装)。
 
 配置：
 

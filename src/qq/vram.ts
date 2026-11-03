@@ -99,14 +99,17 @@ export function ttsFlagsFrom(cfg: VramConfig): TtsFlags | undefined {
 
 /**
  * 在 vram-switcher 允许的窗口里执行一次合成。
- * 顺序必须是：先删 ready、写 busy → 等 ready 且端口通 → 合成 → finally 删 busy。
+ * 顺序：写 busy → 等 ready 且端口通 → 合成 → finally 删 busy。
+ *
+ * 不删上一轮留下的 ready：调度器每 2 秒才看一次 busy，两句挨得太近时它看不到中间那次「没有 busy」，
+ * 当成同一轮、不会再写 ready，删了就只能干等到超时。ready 还在 = 调度器还没收尾，显卡仍归语音；
+ * 它收尾时会自己删 ready，那之后的一句照常等新的 ready。端口不通照样不合成。
  */
 export async function withTtsWindow<T>(
   flags: TtsFlags,
   work: () => Promise<T>,
   options: { pollMs?: number; isReady?: () => Promise<boolean> } = {},
 ): Promise<T> {
-  removeQuietly(flags.ready);
   mkdirSync(dirname(flags.busy), { recursive: true });
   writeFileSync(flags.busy, String(Date.now() / 1000), 'utf8');
   try {

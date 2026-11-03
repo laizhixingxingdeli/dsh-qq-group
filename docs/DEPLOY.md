@@ -303,12 +303,19 @@ python cosyvoice_gateway.py --model-dir pretrained_models/Fun-CosyVoice3-0.5B --
 cd D:\AI
 git clone https://github.com/xiaoxiao150/vram-switcher
 cd vram-switcher
+git apply 本仓库路径\examples\dafeiyu\vram-switcher-fixes.patch
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 mkdir data
 ```
 
 这里的 Python 版本要 ≥ 3.10。
+
+`vram-switcher-fixes.patch` 修的是上游（25effac）在 Windows 上实测出的三个问题，一定要打：
+
+- daemon 拉起的服务会继承它的 stdin，也就是插件发命令的那根管道。daemon 一直挂着读这根管道等命令，Windows 上子进程会卡在 Python 启动阶段，等插件发下一条命令才往下走。语音网关因此要空等几分钟才开始加载，这期间的语音全部超时。
+- 语音网关还在加载（进程在、端口没开）时被当成没在运行：生图前不会停掉它，两边一起占显存；冷却一过还会再启动一份。没打补丁时不要用示例 profile 里 10 秒的启动冷却。
+- 一句语音刚合成完、马上开始画图时，它会在画图途中按「语音结束」去恢复，出图后几秒就把 ComfyUI 停了，插件可能还没取到图。
 
 ### 4.2 profile
 
@@ -352,7 +359,7 @@ mkdir data
 ### 4.4 验收
 
 1. **先手动关掉** IndexTTS 网关和 ComfyUI，之后交给 vram-switcher 去启动。
-2. 群里说「发条语音」：vram-switcher 会自动拉起语音网关，第一次要等 1~2 分钟，之后正常发出语音。
+2. DSH 启动后插件会让 vram-switcher 先把语音网关拉起来（开机后第一次从硬盘加载可能要几分钟，之后约半分钟）。等它就绪后在群里说「发条语音」，应该是本地声音；就绪前的语音最多等 `ttsWaitSeconds`（150 秒），等不到就退回 Edge。
 3. 说「自拍一张」：语音网关被停掉、ComfyUI 被拉起，出图后 ComfyUI 被停掉。
 4. 再说「发条语音」：语音网关重新被拉起。
 5. 整个过程打开任务管理器 →「性能」→ GPU，专用显存不应该接近占满。

@@ -94,18 +94,17 @@ import { withTtsWindow, VramDaemon, readVramConfig } from '../src/qq/vram.ts';
   }
 }
 
-// 4. vram 文件协议：先删 ready、写 busy；等到 ready 才执行；结束删 busy；超时不执行
+// 4. vram 文件协议：写 busy；等到 ready 且端口通才执行；结束删 busy；超时不执行
 {
   const dir = mkdtempSync(join(tmpdir(), 'vram-'));
   try {
     const flags = { busy: join(dir, 'tts_busy.flag'), ready: join(dir, 'tts_ready.flag'), port: 1, waitMs: 2000 };
-    writeFileSync(flags.ready, 'stale');
     let sawBusy = false;
     const pending = withTtsWindow(flags, async () => {
       sawBusy = existsSync(flags.busy);
       return 'done';
     }, { pollMs: 5, isReady: async () => true });
-    // 旧的 ready 必须先被删掉，调度器写了新的才继续
+    // 调度器看到 busy 才腾显卡、写 ready
     await new Promise((r) => setTimeout(r, 20));
     assert.equal(existsSync(flags.busy), true, '等待期间 busy 存在');
     writeFileSync(flags.ready, 'new');
@@ -113,7 +112,19 @@ import { withTtsWindow, VramDaemon, readVramConfig } from '../src/qq/vram.ts';
     assert.equal(sawBusy, true, '合成时 busy 存在');
     assert.equal(existsSync(flags.busy), false, '结束后删 busy');
 
+    // 紧接着又一句：调度器 2 秒才看一次 busy，没看到中间那次「没有 busy」，还当是同一轮，不会再写 ready。
+    // 上一轮的 ready 还在就直接用（实测里第二句因此干等了 150 秒）
+    const started = Date.now();
+    assert.equal(await withTtsWindow(flags, async () => 'again', { pollMs: 5, isReady: async () => true }), 'again');
+    assert.ok(Date.now() - started < 1000, '紧接着的第二句不该等');
+
+    // ready 在但端口不通（语音被停去生图了，或者还在加载）：不合成
     let ran = false;
+    await assert.rejects(withTtsWindow({ ...flags, waitMs: 30 }, async () => { ran = true; }, { pollMs: 5, isReady: async () => false }));
+    assert.equal(ran, false, '端口不通不合成');
+
+    // 调度器收尾时会删 ready：之后没等到新的 ready 就不合成
+    rmSync(flags.ready);
     await assert.rejects(withTtsWindow({ ...flags, waitMs: 30 }, async () => { ran = true; }, { pollMs: 5, isReady: async () => true }));
     assert.equal(ran, false, '没等到 ready 不合成');
     assert.equal(existsSync(flags.busy), false, '超时也删 busy');

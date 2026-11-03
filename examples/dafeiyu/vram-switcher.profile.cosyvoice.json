@@ -24,7 +24,7 @@
       "busy_flag": "D:/AI/vram-switcher/data/tts_busy.flag",
       "ready_flag": "D:/AI/vram-switcher/data/tts_ready.flag",
       "flag_stale_seconds": 900,
-      "start_cooldown_seconds": 150,
+      "start_cooldown_seconds": 10,
       "version_selector": "auto",
       "default_version": "3",
       "detect": {
@@ -77,7 +77,8 @@
           "-u",
           "-s",
           "D:/AI/ComfyUI_windows_portable/ComfyUI/main.py",
-          "--windows-standalone-build"
+          "--windows-standalone-build",
+          "--disable-auto-launch"
         ],
         "cwd": "D:/AI/ComfyUI_windows_portable/ComfyUI",
         "log_file": "D:/AI/vram-switcher/data/comfyui.log"

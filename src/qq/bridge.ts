@@ -682,6 +682,7 @@ export class QqBridge {
       ...(this.config.tts.pythonPath === '' ? {} : { ffmpeg: undefined }),
     });
     this.configureRvc();
+    this.warmUpTts();
 
     this.client = new OneBotClient({
       url: this.config.url,
@@ -3347,6 +3348,24 @@ export class QqBridge {
       return flags === undefined ? {} : { vram: flags };
     } catch {
       return {};
+    }
+  }
+
+  /**
+   * 启动时让 vram-switcher 先把本地 TTS 拉起来：CosyVoice 冷启动要几十秒到几分钟，
+   * 等第一句语音再拉，那句只能干等到超时、退回 Edge。之后它常驻（profile 的 keep_tts_resident）。
+   */
+  private warmUpTts(): void {
+    if (this.config.tts.provider === 'edge') return;
+    try {
+      const cfg = readVramConfig(this.vramDir());
+      if (ttsFlagsFrom(cfg) === undefined) return;
+      this.vramDaemon ??= new VramDaemon(cfg, (level, text) => this.log(level, text));
+      void this.vramDaemon.request('ensure_tts').catch((e) => {
+        this.log('warn', `语音预热失败：${e instanceof Error ? e.message : String(e)}`);
+      });
+    } catch (e) {
+      this.log('warn', `语音预热失败：${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
