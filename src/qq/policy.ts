@@ -284,11 +284,15 @@ export function asksToSendImage(text: string): boolean {
 export function asksForSelfie(text: string, extraKeywords: readonly string[] = []): boolean {
   const value = text.trim();
   if (value === '') return false;
+  // 要听不是要看：「你发句语音」「你来唱首歌」。被当成自拍时会先甩一张表情包，语音也会被挡掉
+  if ((asksForVoice(value) || asksForSong(value)) && !/自拍|照片/.test(value)) return false;
   const extra = extraKeywords.some((word) => word !== '' && value.includes(word));
-  const refersToHer =
-    /你|您|妳|鲸鱼|大肥鱼|尾巴|耳朵|鱼尾|头发|脸|眼睛|衣服|裙子|自拍|照|长什么样|长啥样/.test(value) || extra;
+  const aboutHer =
+    /鲸鱼|大肥鱼|尾巴|耳朵|鱼尾|头发|脸|眼睛|衣服|裙子|自拍|照|长什么样|长啥样/.test(value) || extra;
   const asks = /看看|看一下|看下|露一下|展示|发|来|拍|爆|整/.test(value);
-  return refersToHer && asks;
+  // 光有「你」要配明确的「看/露/展示/拍」：「你发…」「你来…」太宽（你发什么呆、你来干嘛）
+  const showYourself = /你|您|妳/.test(value) && /看看|看一下|看下|露一下|展示|拍|爆/.test(value);
+  return (aboutHer && asks) || showYourself;
 }
 
 /**
@@ -298,7 +302,7 @@ export function asksForSelfie(text: string, extraKeywords: readonly string[] = [
 export function asksForVoice(text: string): boolean {
   const value = text.trim();
   if (value === '') return false;
-  return /(?:发|来|整|说)(?:个|条|段|一句)?语音|语音(?:说|回复|来|发|给|听)|用语音|说句话|说一句|听听(?:你的)?声音|让我听听|说话听听/.test(value);
+  return /(?:发|来|整|说)(?:[一两几]?[个条段句]|一下)?语音|语音(?:说|回复|来|发|给|听)|用语音|说句话|说一句|听听(?:你的)?声音|让我听听|说话听听/.test(value);
 }
 
 /** 是否在明确要求唱歌 */
