@@ -29,7 +29,7 @@
       "dafeiyu": {
         "groupMaxAffinity": 60,
         "newRevealTurns": 3,
-        "appearance": "1girl, solo, whale girl, long hair, blue hair, gradient hair, white hair tips, blue eyes, ahoge, maid headdress, maid outfit, blue and white, whale tail, cute, smile, anime style",
+        "appearance": "deepseek_whale_girl, deepseek_maid_outfit, 1girl, solo, blue hair, very long hair, wavy hair, gradient blue hair, bangs, ahoge, blue eyes, whale fin ears, blue hair bows, maid headdress, navy dress, white frilled apron, gold trim, dark blue neck bow, blue gemstone brooch, puff sleeves, long sleeves, tail, starry tail pattern",
         "tiers": [
           {
             "min": -100,

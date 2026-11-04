@@ -35,7 +35,7 @@
 "extensions": { "dafeiyu": {
   "groupMaxAffinity": 60,   // 群里最多按 60 的好感解锁（一群人面前不说最私密的事）
   "newRevealTurns": 3,      // 新解锁的设定，接下来 3 次回复里提示她找机会说
-  "appearance": "1girl, blue hair, whale tail",   // 自拍用的外形 tag
+  "appearance": "1girl, blue hair, whale fin ears, tail",   // 自拍用的外形 tag（别写 whale tail：在 Danbooru 里是内衣 tag）
   "tiers": [ { "min": 0, "name": "普通", "tone": "…" }, { "min": 40, "name": "朋友", "tone": "…" } ]
 }}
 ```

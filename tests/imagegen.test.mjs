@@ -156,4 +156,53 @@ import { withTtsWindow, VramDaemon, readVramConfig } from '../src/qq/vram.ts';
   assert.equal(readVramConfig('/nonexistent').enabled, false, '没有配置文件 = 关闭');
 }
 
+// 6. 示例工作流：自拍走 workflow-selfie.json，大肥鱼 LoRA 接进模型和两个 CLIP；帮人画图不带 LoRA
+{
+  const dir = mkdtempSync(join(tmpdir(), 'img-example-'));
+  try {
+    const examples = new URL('../examples/dafeiyu/', import.meta.url);
+    for (const name of ['workflow.json', 'workflow-selfie.json']) {
+      const graph = JSON.parse(readFileSync(new URL(name, examples), 'utf8'));
+      // 连线 [节点, 输出] 要指向存在的节点，不然 ComfyUI 整单拒收
+      for (const [id, node] of Object.entries(graph)) {
+        for (const value of Object.values(node.inputs)) {
+          if (Array.isArray(value)) assert.ok(value[0] in graph, `${name} 的节点 ${id} 连到了不存在的节点 ${value[0]}`);
+        }
+      }
+      writeFileSync(join(dir, name), JSON.stringify(graph));
+    }
+    writeFileSync(join(dir, 'config.json'), JSON.stringify({ enabled: true, scope: 'all' }));
+    const cfg = readImageGenConfig(dir);
+    let submitted;
+    const fetchImpl = async (url, init) => {
+      if (url.endsWith('/prompt')) {
+        submitted = JSON.parse(init.body).prompt;
+        return { ok: true, status: 200, json: async () => ({ prompt_id: 'p1' }), text: async () => '', arrayBuffer: async () => new ArrayBuffer(0) };
+      }
+      if (url.includes('/history/')) {
+        const body = { p1: { status: { status_str: 'success' }, outputs: { '9': { images: [{ filename: 'a.png', subfolder: '', type: 'output' }] } } } };
+        return { ok: true, status: 200, json: async () => body, text: async () => '', arrayBuffer: async () => new ArrayBuffer(0) };
+      }
+      return { ok: true, status: 200, json: async () => ({}), text: async () => '', arrayBuffer: async () => new Uint8Array([137, 80, 78, 71]).buffer };
+    };
+
+    const selfie = await drawImage(dir, cfg, { kind: 'selfie', prompt: 'waving', requesterQq: '30003' }, { appearance: 'deepseek_whale_girl, blue hair', fetchImpl, pollMs: 1 });
+    assert.ok(selfie.ok, '示例自拍工作流能出图');
+    assert.equal(submitted['10'].class_type, 'LoraLoader');
+    assert.equal(submitted['10'].inputs.lora_name, 'deepseek_maid_outfit_illustrious_v10.safetensors');
+    assert.deepEqual(submitted['3'].inputs.model, ['10', 0], '采样用加了 LoRA 的模型');
+    assert.deepEqual(submitted['6'].inputs.clip, ['10', 1], '正向提示词走 LoRA 的 CLIP');
+    assert.deepEqual(submitted['7'].inputs.clip, ['10', 1], '反向提示词走 LoRA 的 CLIP');
+    assert.ok(submitted['6'].inputs.text.startsWith('masterpiece, best quality, deepseek_whale_girl, blue hair, selfie, waving'), '触发词进了自拍提示词');
+    assert.equal(typeof submitted['3'].inputs.seed, 'number');
+    assert.equal(typeof submitted['5'].inputs.width, 'number');
+
+    const other = await drawImage(dir, cfg, { kind: 'request', prompt: 'a cat', requesterQq: '30003' }, { fetchImpl, pollMs: 1 });
+    assert.ok(other.ok);
+    assert.ok(!Object.values(submitted).some((node) => node.class_type === 'LoraLoader'), '帮人画图不带大肥鱼 LoRA');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 console.log('imagegen + vram tests passed');

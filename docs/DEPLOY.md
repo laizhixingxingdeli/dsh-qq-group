@@ -266,6 +266,18 @@ python cosyvoice_gateway.py --model-dir pretrained_models/Fun-CosyVoice3-0.5B --
 2. 把正向提示词改成 `{{prompt}}`，可以前后加固定内容，比如 `masterpiece, {{prompt}}`；反向提示词改成 `{{negative}}`；种子填 `{{seed}}`；宽高填 `{{width}}`、`{{height}}`。
 3. 存成 `数据目录\imagegen\workflow.json`。自拍想用另一套工作流（比如带角色 LoRA、IPAdapter 保持长相一致），就另存一份 `workflow-selfie.json`。
 
+**自拍加大肥鱼的角色 LoRA（推荐）**：不加的话，生图模型不知道大肥鱼长什么样，画出来不像。
+
+1. 登录 Civitai，下载 [DeepSeek 小鲸鱼（大肥鱼）](https://civitai.com/models/2697171?modelVersionId=3218534) 的 **IllustriousXL v1.0** 版。
+   - 文件名 `deepseek_maid_outfit_illustrious_v10.safetensors`，81.5MB。
+   - SHA256 `9D9DE166D237A107A311F0E499756BF8EF390991F282D1A32BFD9F043EAA9BC5`。
+   - 不登录下载不了。角色按 CC BY-NC-SA 4.0 授权，不能商用。
+2. 放进 `ComfyUI\models\loras\`。
+3. 把 `examples\dafeiyu\workflow-selfie.json` 复制到 `数据目录\imagegen\workflow-selfie.json`，一样要改 `ckpt_name`。LoRA 强度是 0.9，作者推荐 0.7～1.0。
+4. 示例角色卡的 `appearance` 已经换成这个 LoRA 的触发词（`deepseek_whale_girl, deepseek_maid_outfit, …`），不用另外改。
+
+实测用 Animagine XL 4.0 加这个 LoRA 画出来像。ComfyUI 日志里没有 `lora key not loaded`，RTX 4070 SUPER 上一张 20 秒左右。插件每次画图都重新读工作流，换文件不用重启。
+
 ### 3.3 配置
 
 把 `examples\dafeiyu\imagegen.config.json` 复制成 `数据目录\imagegen\config.json`。**还没装 vram-switcher 时，先把 `useVram` 改成 `false`**：
@@ -290,7 +302,7 @@ python cosyvoice_gateway.py --model-dir pretrained_models/Fun-CosyVoice3-0.5B --
 
 | 操作 | 预期 |
 |---|---|
-| 群里说「自拍一张」 | 她先回「等我画一下」之类的话，几十秒后发图 |
+| 群里说「自拍一张」 | 她先回一句话（表情包库里有自拍图时，还会先发一张现成的）；模型决定画的话，几十秒后再发现画的图 |
 | 说「画一只戴帽子的猫」 | 画猫 |
 | 说「画个色图」 | 直接拒绝，**不会调用 ComfyUI** |
 | 同一个人一天要第 6 张 | 回「你今天已经让我画好几张了」 |
