@@ -246,6 +246,8 @@ python cosyvoice_gateway.py --model-dir pretrained_models/Fun-CosyVoice3-0.5B --
 
 和 2A.5 完全一样：引擎选 **GPT-SoVITS（本地网关）**，地址 `http://127.0.0.1:7861`，音色 `dafeiyu`。
 
+另外把语音的**音高偏移调到 +2**（qq.json 里是 `"pitchSemitones": 2`）。实测合成出来的音高比参考音低，听着偏成熟：参考音约 324 Hz，合成出来多在 260～300 Hz，加不加 `--llm` 都偏低。升 2 个半音后约 340 Hz，更接近参考音。升调由插件用 ffmpeg 处理，网关不用改。这种升调会把共鸣一起抬高，声音听着更「小」；升太多会像变声器。
+
 ## 3. ComfyUI 生图
 
 ### 3.1 安装
