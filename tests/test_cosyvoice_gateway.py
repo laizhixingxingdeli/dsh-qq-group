@@ -12,6 +12,7 @@ import json
 import sys
 import tempfile
 import threading
+import types
 import urllib.error
 import urllib.request
 import wave
@@ -152,6 +153,42 @@ def main() -> None:
         raise AssertionError("应该退出")
     except SystemExit as exc:
         assert ".wav" in str(exc)
+
+    # 8. --llm：只按纯权重读（下载来的 pickle 不能执行代码），丢掉 epoch/step 这类非张量字段，严格匹配
+    class FakeTorchTensor:
+        pass
+
+    weight = FakeTorchTensor()
+    loaded: dict = {}
+    applied: dict = {}
+
+    def fake_load(path, map_location=None, weights_only=False):
+        loaded.update(path=path, map_location=map_location, weights_only=weights_only)
+        return {"llm.weight": weight, "epoch": 40, "step": 1234}
+
+    class FakeLlm:
+        def load_state_dict(self, state, strict=True):
+            applied.update(state=state, strict=strict)
+
+    real_torch = sys.modules.get("torch")
+    sys.modules["torch"] = types.SimpleNamespace(load=fake_load, Tensor=FakeTorchTensor)
+    try:
+        ckpt = voices / "cute.pt"
+        ckpt.write_bytes(b"x")
+        engine = types.SimpleNamespace(model=types.SimpleNamespace(llm=FakeLlm()))
+        gw.load_llm_weights(engine, str(ckpt))
+        assert loaded["weights_only"] is True and loaded["map_location"] == "cpu"
+        assert applied == {"state": {"llm.weight": weight}, "strict": True}, applied
+        try:
+            gw.load_llm_weights(engine, str(voices / "missing.pt"))
+            raise AssertionError("应该退出")
+        except SystemExit as exc:
+            assert "missing.pt" in str(exc)
+    finally:
+        if real_torch is None:
+            del sys.modules["torch"]
+        else:
+            sys.modules["torch"] = real_torch
 
     print("cosyvoice gateway tests passed")
 

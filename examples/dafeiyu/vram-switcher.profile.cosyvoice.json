@@ -45,7 +45,7 @@
             "dafeiyu",
             "--port",
             "7861",
-            "--fp16"
+            "--no-emotion"
           ],
           "cwd": "D:/AI/CosyVoice",
           "env": {

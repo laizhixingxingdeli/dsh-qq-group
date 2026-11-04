@@ -18,7 +18,10 @@ vram-switcher 可以直接用端口判断就绪。
 
 情绪：插件传来的 style 里含「开心/生气/难过…」时，换成 CosyVoice3 训练过的指令
 （非常开心 / 非常伤心 / 非常生气 / 小声），走 inference_instruct2；认不出就按普通语气说。
---no-emotion 关掉。
+--no-emotion 关掉。指令模式不看参考音的逐字稿，音色没有零样本像；克隆某个角色的声音时建议关掉。
+
+--llm 微调权重.pt：换上为某个音色微调过的 LLM（比如 FeiyuVoice 的 feiyu_cute_F6_0040.pt）。
+只按纯权重读取：下载来的 .pt 是 pickle，直接 torch.load 会执行文件里的代码。
 """
 
 from __future__ import annotations
@@ -95,6 +98,20 @@ def load_engine(args: argparse.Namespace) -> None:
 
     ENGINE = AutoModel(model_dir=str(model_dir), fp16=args.fp16)
     print(f"[gateway] CosyVoice3 已加载：{model_dir}（采样率 {ENGINE.sample_rate}）", flush=True)
+    if getattr(args, "llm", ""):
+        load_llm_weights(ENGINE, args.llm)
+        print(f"[gateway] 已换上微调 LLM：{args.llm}", flush=True)
+
+
+def load_llm_weights(engine, path: str) -> None:
+    import torch
+
+    if not Path(path).is_file():
+        raise SystemExit(f"[gateway] 找不到 --llm 指定的权重：{path}")
+    state = torch.load(path, map_location="cpu", weights_only=True)
+    # 训练脚本存的 checkpoint 里会夹带 epoch、step 这类不是张量的字段
+    tensors = {key: value for key, value in state.items() if isinstance(value, torch.Tensor)}
+    engine.model.llm.load_state_dict(tensors, strict=True)
 
 
 def encode_wav(chunks, sample_rate: int) -> bytes:
@@ -179,6 +196,7 @@ def main() -> None:
     parser.add_argument("--fp16", action="store_true", help="半精度，省显存（没有 CUDA 时自动关闭）")
     parser.add_argument("--speed", type=float, default=1.0, help="语速倍率")
     parser.add_argument("--no-emotion", action="store_true", help="不按 style 切换语气")
+    parser.add_argument("--llm", default="", help="微调过的 LLM 权重（.pt），替换模型目录里的 llm.pt")
     parser.add_argument("--max-chars", type=int, default=200)
     parser.add_argument("--verbose", action="store_true")
     ARGS = parser.parse_args()

@@ -218,6 +218,11 @@ D:\AI\voices\dafeiyu.txt   这段音频里说的话，一字不差，UTF-8 编�
 
 有逐字稿，网关会做**零样本克隆**，音色最像；没有逐字稿，会退回**跨语种模式**，能用但像度差一些。启动日志会写明每个音色用的是哪种模式。
 
+用 Esmerubphire 的 FeiyuVoice-CosyVoice3 声库时要注意搭配（见声库里的 manifest）：
+
+- 可爱版参考音（2.7 秒，「我已经准备好了，我们开始吧。」）要配声库里微调过的 `models/feiyu_cute_F6_0040.pt`（约 1.9GB），用 2B.4 的 `--llm` 加载。只用通用权重会不像。
+- 温柔版参考音（10 秒）配通用权重就行。
+
 ### 2B.4 启动网关
 
 把仓库里的 `tools\cosyvoice_gateway.py` 复制到 `D:\AI\CosyVoice\`（和 `webui.py` 放在同一级），然后运行：
@@ -225,13 +230,15 @@ D:\AI\voices\dafeiyu.txt   这段音频里说的话，一字不差，UTF-8 编�
 ```bash
 cd D:\AI\CosyVoice
 conda activate cosyvoice
-python cosyvoice_gateway.py --model-dir pretrained_models/Fun-CosyVoice3-0.5B --voices D:\AI\voices --default-voice dafeiyu --port 7861 --fp16
+python cosyvoice_gateway.py --model-dir pretrained_models/Fun-CosyVoice3-0.5B --voices D:\AI\voices --default-voice dafeiyu --port 7861 --no-emotion
 ```
 
 看到 `[gateway] 监听 http://127.0.0.1:7861` 就说明启动好了。
 
+- `--no-emotion`：不按情绪切换语气，一直用零样本克隆。克隆角色声音时要加。不加的话，插件认不出情绪时会默认传「开心」，网关就改走指令模式（「请非常开心地说一句话」）。指令模式不看参考音的逐字稿，实测音色不像，机械感也重。
+- `--llm 权重.pt`：换上为这个音色微调过的 LLM，比如 `--llm D:\AI\voice-models\feiyu-cute-F6\feiyu_cute_F6_0040.pt`。网关只按纯权重读取，不会执行文件里的代码；加载要多花几十秒。
+- `--fp16`：半精度。12GB 显卡上实测几乎不省显存，声库作者也没有开，默认不加。
 - `--speed 1.1`：语速稍快一点。
-- `--no-emotion`：不切换语气，一直用零样本克隆，音色最稳。
 
 **单独验收**：和 2A.4 一样，用 `curl --noproxy "*"` 调 `/health` 和 `/tts`。`/health` 的返回里会列出识别到的音色。
 
